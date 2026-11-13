@@ -1,0 +1,48 @@
+name: API tests
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *"      # every night at 03:00 UTC
+  workflow_dispatch:          # manual run with a parameter
+    inputs:
+      count:
+        description: "How many bookings bulk_create.py should create"
+        default: "5"
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest tests/unit --junitxml=results/unit.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-results
+          path: results/
+
+  api:
+    needs: unit                # runs only after unit tests pass (downstream job)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: API tests
+        run: pytest tests/api --junitxml=results/api.xml
+      - name: Bulk create
+        if: always()
+        run: python bulk_create.py --count "${{ inputs.count || '5' }}" --junit results/bulk.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: api-results
+          path: results/
