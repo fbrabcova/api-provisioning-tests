@@ -41,12 +41,11 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-    J["Jenkins job<br/>parameter: user count"] -->|SSH: test script + start file| P["Windows test PC"]
-    P --> R["Python test<br/>headless login,<br/>bulk create, confirm all"]
+    J1["Jenkins job starts<br/>parameter: user count"] -->|"SSH: copy test,<br/>create start file"| R["Windows test PC<br/>Python test: headless login,<br/>bulk create, confirm all"]
     R --> D["Identity platform<br/>dashboard API"]
     D --> G["Google Workspace /<br/>Microsoft 365 accounts"]
     D --> I["Identity platform<br/>accounts"]
-    P -->|result file, polled by Jenkins| J
+    R -->|"exit code<br/>in result file"| J2["Jenkins polls the PC,<br/>reads the result,<br/>sets build status"]
 ```
 
 The user count was a parameter, so one job served four goals:
