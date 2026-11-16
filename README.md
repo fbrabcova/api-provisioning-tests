@@ -1,8 +1,62 @@
 # API provisioning tests
 
+[![API tests](https://github.com/fbrabcova/api-provisioning-tests/actions/workflows/tests.yml/badge.svg)](https://github.com/fbrabcova/api-provisioning-tests/actions/workflows/tests.yml)
+
 Automated API tests in Python for the public [Restful Booker](https://restful-booker.herokuapp.com/apidoc/index.html) API, run by GitHub Actions on every push, every night and on demand.
 
-The project is a public rebuild of a test I wrote at work: a Jenkins job that bulk-provisioned users through a REST API, verified them and reported the result back to CI. The original code is private, so this version uses a public practice API. The architecture is the same, and the problems I found when reviewing the original are fixed here.
+The project is a public rebuild of a test I designed at work: a Jenkins job that bulk-provisioned user accounts through an identity platform's REST API into Google Workspace and Microsoft 365, verified them and reported the result back to CI. The original code is private, so this version uses a public practice API. The architecture is the same, and the problems I found when reviewing the original are fixed here.
+
+## How the pipeline works
+
+```mermaid
+flowchart LR
+    T["Trigger<br/>push, nightly schedule,<br/>manual run with count"] --> U["Job: unit<br/>unit tests with mocks<br/>no network"]
+    U -->|only if green| A["Job: api<br/>API tests + bulk_create.py"]
+    A <--> R[("Restful Booker API")]
+    A --> J["JUnit XML reports"]
+    J --> S["Results table<br/>on the run page"]
+    J --> F["Downloadable<br/>artifacts"]
+```
+
+## What one test does
+
+Every test checks the outcome, not only the status code:
+
+```mermaid
+sequenceDiagram
+    participant T as Test
+    participant API as Restful Booker
+    T->>API: GET /ping (poll until ready)
+    T->>API: POST /auth
+    API-->>T: token
+    T->>API: POST /booking (unique name)
+    API-->>T: bookingid
+    T->>API: GET /booking/:id
+    API-->>T: stored booking
+    Note over T: Test oracle: stored data must equal sent data
+    T->>API: DELETE /booking/:id (cleanup)
+```
+
+## Background: the original test
+
+```mermaid
+flowchart LR
+    J["Jenkins job<br/>parameter: user count"] -->|SSH: test script + start file| P["Windows test PC"]
+    P --> R["Python test<br/>headless login,<br/>bulk create, confirm all"]
+    R --> D["Identity platform<br/>dashboard API"]
+    D --> G["Google Workspace /<br/>Microsoft 365 accounts"]
+    D --> I["Identity platform<br/>accounts"]
+    P -->|result file, polled by Jenkins| J
+```
+
+The user count was a parameter, so one job served four goals:
+
+| Goal | Test type | How this repository reflects it |
+|---|---|---|
+| An account is created and linked on both sides | Functional end-to-end test | Every booking is read back and compared with what was sent |
+| Many staged accounts can be confirmed at once without errors on either side | Volume test of a bulk operation | `bulk_create.py --count N` verifies every item and fails the run on any error |
+| How the platform behaves with hundreds of users at once | Performance / load test | Per-item timing is recorded in the JUnit report. Load is deliberately not run here: a shared public sandbox is not a place for load tests |
+| Where the limits of the count parameter are | Boundary value analysis and capacity testing | The count is a CI parameter (manual run), so runs with 0, 1 and growing values can be compared |
 
 ## What it shows
 
@@ -16,6 +70,7 @@ The project is a public rebuild of a test I wrote at work: a Jenkins job that bu
 | Unit tests with mocks, no network (fast, run first) | `tests/unit/` |
 | Bulk data provisioning with per-item verification and a JUnit XML report | `bulk_create.py` |
 | CI: unit job, then API job (downstream), nightly schedule, manual run with a parameter, artifacts | `.github/workflows/tests.yml` |
+| Test results shown on the run page, parsed from JUnit XML | `scripts/junit_summary.py` |
 | Correct exit codes, so a failed run can never show green | `bulk_create.py`, pytest |
 
 ## Lessons from the original test, applied here
@@ -25,7 +80,7 @@ The project is a public rebuild of a test I wrote at work: a Jenkins job that bu
 3. **Retry only what is safe to repeat.** The original retried the whole create sequence, including a non-idempotent POST, which could create duplicates. Here POST is retried only after checking that the first attempt did not already create the record.
 4. **Time units in names.** The original compared a timeout of 60000 (milliseconds) with seconds, so a stuck run waited almost 17 hours. Here every timeout is in seconds and named `*_s`.
 5. **Wait for a state, not a time.** Fixed sleeps make tests flaky. Here the client polls `/ping` until the API is ready.
-6. **Publish results.** Results are written as JUnit XML and stored as CI artifacts.
+6. **Publish results.** Results are written as JUnit XML, shown as a table on the run page and stored as artifacts.
 
 ## Run it locally
 
@@ -50,6 +105,8 @@ booker/
 tests/
   unit/            unit tests with mocks (no network)
   api/             API tests against the live service
+scripts/
+  junit_summary.py JUnit XML to a results table in GitHub Actions
 bulk_create.py     bulk provisioning script with JUnit report
 .github/workflows/ CI pipeline
 ```
